@@ -31,7 +31,7 @@ from torch.distributions.uniform import Uniform
 from IPython.display import clear_output
 
 
-def plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost_func,config,epoch_idx):
+def plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost_func,config,epoch_idx,improved_latents,cost_test3):
 
 
     
@@ -44,6 +44,7 @@ def plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost
 
     #Random latents to see the whole space
     combined_test2 = torch.cat((latents_test.to("cpu"),cost_test2.to("cpu")),dim=1)
+    combined_test3 = torch.cat((improved_latents.to("cpu"),cost_test3.to("cpu")),dim=1)
     
 
     overall_original = pd.DataFrame(combined_original.detach().numpy(),columns = ['x','y','ov'])
@@ -53,11 +54,12 @@ def plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost
     overall_test = pd.DataFrame(combined_test.detach().numpy(),columns = ['x','y','ov'])
 
     overall_test2 = pd.DataFrame(combined_test2.detach().numpy(),columns = ['x','y','ov'])
+    overall_test3 = pd.DataFrame(combined_test3.detach().numpy(),columns = ['x','y','ov'])
 
     clear_output(wait=True)
     plt.clf()
     
-    fig, axs = plt.subplots(ncols=5,figsize=(100,30))
+    fig, axs = plt.subplots(ncols=6,figsize=(100,30))
 
     sns.scatterplot(data=overall_original, x="x", y="y", hue="ov",hue_norm = (-2,3),palette = "icefire",ax=axs[0],s=400)
     sns.scatterplot(data=overall_train, x="x", y="y", hue="ov",hue_norm = (-2,3),palette = "icefire",ax=axs[1],s=400)
@@ -65,83 +67,64 @@ def plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost
     sns.scatterplot(data=overall_test2, x="x", y="y", hue="ov",hue_norm = (-2,3),palette = "icefire",ax=axs[3],s=400)
     sns.scatterplot(data=overall_test2, x="x", y="y", hue="ov",hue_norm = (2.94,3),palette = "icefire",ax=axs[4],s=400)
 
+
+    #sns.scatterplot(data=overall_test3, x="x", y="y", hue="ov",hue_norm = (-2,3),palette = "icefire",ax=axs[5],s=400)
+
+
+    #XY is the start
+    #XY text is the enc
+    coordinates_from = latents_test.tolist()
+    coordinates_too = improved_latents.tolist()
+
+
+    for i,j in zip(coordinates_from[0:10],coordinates_too[0:10]):
+
+        axs[5].annotate(
+            '', 
+            xy=tuple(i),
+            #xycoords='data',
+            xytext=tuple(j),
+            #textcoords='data',
+            arrowprops=dict(arrowstyle= '<|-, head_width=1',color='black',lw=5,ls='-')
+        )
+
+
+    
+
+    #This needs to be used to plot how the latent vectors are changing
+    
+
     axs[0].set_ylim(-1,1)
     axs[1].set_ylim(-1,1)
     axs[2].set_ylim(-1,1)
     axs[3].set_ylim(-1,1)
+    axs[4].set_ylim(-1,1)
+    axs[5].set_ylim(-1,1)
 
     axs[0].set_xlim(-1,1)
     axs[1].set_xlim(-1,1)
     axs[2].set_xlim(-1,1)
-    axs[3].set_ylim(-1,1)
+    axs[3].set_xlim(-1,1)
+    axs[4].set_xlim(-1,1)
+    axs[5].set_xlim(-1,1)
 
     save_path =  os.path.join(config.output_path, "latent_images","out:{}.png".format(epoch_idx))
 
     plt.show()
     fig.savefig(save_path) 
 
-
-
-
-
-    
-
-    
+    time.sleep(4)
 
 
 
 
 
-#Sample random solutions
-def sample_solutions(model,batch_size,solution_num,config,random):
-
-    solutions_1 = []
-    solutions_2 = [] 
-    epoch_num = math.ceil(solution_num/batch_size)
-
-
-    #We have to generate solutions in batches which is very interesting since we can in theory try to improve within these as we try to generate data from which we will improve on
-    for i in range(epoch_num):
-
-        #Random Latents
-        solution_1 = generate_uniform_vectors(batch_size,dim =2).to(config.device)
-        solution_2 = generate_uniform_vectors(batch_size, dim =2).to(config.device)
-
-        #Decode new solutions
-        if not random:
-
-
-            _, solution_1, _ = model.decode(
-                
-                solutions = None,
-                context = None,
-                latent_vector = solution_1,
-                config = config,
-                greedy = False,
-                
-            )
-
-            _, solution_2, _ = model.decode(
-                
-                solutions = None,
-                context = None,
-                latent_vector = solution_2,
-                config = config,
-                greedy = False,
-                
-            )
-            
-
-        solutions_1 = solutions_1 + solution_1.tolist()
-        solutions_2 = solutions_2 + solution_2.tolist()
-
-    return solutions_1,solutions_2
 
 
 def generate_data(model,batch_size,solution_num,config,random):
 
-    solution_1 = generate_uniform_vectors(batch_size,dim =2).to(config.device)
-    solution_2 = generate_uniform_vectors(batch_size, dim =2).to(config.device)
+    solution_1 = generate_uniform_vectors(batch_size).to(config.device)
+    solution_2 = generate_uniform_vectors(batch_size).to(config.device)
 
     #Decode new solutions
     if not random:
@@ -209,152 +192,117 @@ def calculate_C_loss(mean,advantage):
     return CL
 
 
+def calculate_Improvement_loss(tour_logp_improved,improvement):
 
-def train_epoch(model,training_dataset,config, epoch_idx, optimizer,cost_func,writer):
+    RL = -(tour_logp_improved*improvement).sum()
+
+    return RL
+
+
+
+def train_epoch(model,training_dataset,config, epoch_idx, optimizer,optimizer_imp,cost_func,writer):
 
     model.train()
 
-    #We have switched off resampling instances so we cna really just monitor how the encoder trains
-    #If we have different contexts for each problem then we resample them here
-    #training_dataset.resample_instances()
-
-    training_dataloader = DataLoader(training_dataset, batch_size=config.batch_size, num_workers=0, shuffle=False)
-
-    #Generate solutions and add them to dataset
-    #We need to sampling this using the model
-    solutions_1,solutions_2 = sample_solutions(model,batch_size = config.batch_size, solution_num = config.epoch_size,config  = config,random = epoch_idx == 1)
-
-    
-    #Evaluating the solutions that we generated
-    sample_costs = cost_func(torch.from_numpy(np.array(solutions_1+solutions_2)))
-
-
-    #if epoch_idx == 1:
-    #Remove the resetting of solutions which I think could be very important
-    training_dataset.set_solutions(solutions_1,solutions_2)
-    training_dataloader = DataLoader(training_dataset, batch_size=config.batch_size, shuffle=False)
-    
-
-    #You should probably do multiple loops through single epoch
-    for i in range(1):
-
-        #Variables to track during training
-        loss_RC_values = []
-        loss_KLD_values = []
-        loss_Centering_values = []
-        mean_encoder_logvar = []
-        loss_total = []
+    #Variables to track during training
+    loss_RC_values = []
+    loss_KLD_values = []
+    loss_Centering_values = []
+    mean_encoder_logvar = []
+    loss_total = []
+    loss_improvement = []
+    sample_scores = []
 
 
 
-        #Update Model
-        #for batch_id,batch in tqdm(enumerate(training_dataloader)):
-        for i in range(46): #182
+    #Update Model
+    for i in range(46): #182
 
-            batch_solutions_1, batch_solutions_2 = generate_data(
-                
-                model = model,
-                batch_size = config.batch_size,
-                solution_num = config.epoch_size,
-                config  = config,
-                random = epoch_idx == 1,
+        batch_solutions_1, batch_solutions_2 = generate_data(
+            
+            model = model,
+            batch_size = config.batch_size,
+            solution_num = config.epoch_size,
+            config  = config,
+            random = epoch_idx == 1,
 
-            )
+        )
+
+
+        training_dataset.set_solutions(batch_solutions_1.tolist(),batch_solutions_2.tolist())
+
+
+
+        #Costs to calculate performance
+        reward_1 = cost_func(batch_solutions_1)
+        reward_2 = cost_func(batch_solutions_2)
+
+        sample_scores = sample_scores + reward_1.tolist()+ reward_2.tolist()
+
+        solutions = torch.cat((batch_solutions_1,batch_solutions_2),dim=0)
+        advantage_estimate = torch.cat((reward_1 - reward_2,reward_2 - reward_1),dim=0)
+
+        #Normalising the advantages as they get very small later on
+        adv_mean = torch.mean(advantage_estimate)
+        adv_std = torch.std(advantage_estimate)
+        normalized_advantage = (advantage_estimate - adv_mean)/adv_std
+        advantage_estimate = normalized_advantage
+
+        #Gets rid of advantage estimation if need be
+        advantage_estimate = torch.ones(size = (solutions.shape[0],1)).to(solutions.device)
+
+
+        _,mean,log_var,Z, tour_idx,tour_logp,_,tour_idx_improved,tour_logp_improved = model(context = None,solution = solutions,config = config)
+
+
+        # Calculate Losses
+        loss_RC = calculate_weighted_RC_loss(tour_logp,advantage_estimate)
+        loss_KLD = calculate_KLD_loss(mean, log_var,advantage_estimate) 
+        loss_Centering  = calculate_C_loss(mean,advantage_estimate)
+
+
+        improvement = cost_func(tour_idx_improved) - cost_func(tour_idx)
+        loss_Improvement = calculate_Improvement_loss(tour_logp_improved,improvement)
 
         
-            #This might be the wrong part
-            #advantage_estimate = reward_1 - reward_2
-            #indicator = (advantage_estimate > 0)
-            #solution_best = (indicator.int().unsqueeze(dim=1)*batch_solutions_1 +(1-indicator.int()).unsqueeze(dim=1)*batch_solutions_2).long()
-            #reward_2 = cost_func(batch_solutions_2)
-            #_, batch_solutions_1, batch_solutions_2 = batch
+
+        loss = (loss_RC + loss_KLD * config.KLD_weight)
+        #loss = loss_RC
 
 
-            reward_1 = cost_func(batch_solutions_1)
-            reward_2 = cost_func(batch_solutions_2)
+        
+        #Update step
+        optimizer.zero_grad()
+        assert not torch.isnan(loss)
+        assert not torch.isnan(loss_Improvement)
+        loss.backward(retain_graph = True)
+        #loss_Improvement.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
+        optimizer.step()
+        #optimizer_imp.step()
 
 
-
-            #advantage_estimate = reward_1
-            #advantage_estimate = torch.ones(reward_1.shape).to(reward_1.device)
-            #solution_best = batch_solutions_1
-
-            #advantage_estimate = reward_1 - reward_2
-            #indicator = (advantage_estimate > 0)
-            #solution_best = (indicator.int().unsqueeze(dim=1)*batch_solutions_1 +(1-indicator.int()).unsqueeze(dim=1)*batch_solutions_2).long()
-
-            solution_best = torch.cat((batch_solutions_1,batch_solutions_2),dim=0)
-
-            #Now we need to normalise the advantages as they get very small later on
-            advantage_estimate = torch.cat((reward_1 - reward_2,reward_2 - reward_1),dim=0)
-            adv_mean = torch.mean(advantage_estimate)
-            adv_std = torch.std(advantage_estimate)
-            normalized_advantage = (advantage_estimate - adv_mean)/adv_std
-
-            advantage_estimate = normalized_advantage
+        
 
 
 
+        #Storing loss terms
+        loss_RC_values.append(loss_RC.item())
+        loss_KLD_values.append(loss_KLD.item())
+        loss_Centering_values.append(loss_Centering.item())
+        loss_total.append(loss.item())
+        loss_improvement.append(improvement.mean())
 
-            #advantage_estimate = torch.ones(size = (solution_best.shape[0],1)).to(solution_best.device)
-
-
-
-
-
-
-            _,mean,log_var,Z, tour_idx,tour_logp,_ = model(context = None,solution = solution_best,config = config)
-
-
-
-            # Calculate Losses
-            loss_RC = calculate_weighted_RC_loss(tour_logp,advantage_estimate)
-            loss_KLD = calculate_KLD_loss(mean, log_var,advantage_estimate) 
-            loss_Centering  = calculate_C_loss(mean,advantage_estimate)
-            
-            loss_score = (reward_1,cost_func(tour_idx))
-
-            
-
-            loss = (loss_RC + loss_KLD * config.KLD_weight)
-            #loss = loss_RC
-
-            
-            
-            #Update step
-            optimizer.zero_grad()
-            assert not torch.isnan(loss)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
-            optimizer.step()
-
-            #Storing loss terms
-            loss_RC_values.append(loss_RC.item())
-            loss_KLD_values.append(loss_KLD.item())
-            loss_Centering_values.append(loss_Centering.item())
-            loss_total.append(loss.item())
-
-            #Storing useful data for interpretation
-            mean_encoder_logvar.append(torch.exp(log_var).mean().item())
+        #Storing useful data for interpretation
+        mean_encoder_logvar.append(torch.exp(log_var).mean().item())
 
 
-        performance = sum(loss_total)/len(loss_total)
-
-        #print("Performance:{}".format(performance))
-        #writer.add_scalar("Total Loss:{}".format(epoch_idx), performance, i)
+    return loss_RC_values,loss_KLD_values,loss_Centering_values,loss_improvement,mean_encoder_logvar,model,sample_scores,training_dataset
 
 
 
-
-
-    
-
-
-    return loss_RC_values,loss_KLD_values,loss_Centering_values,mean_encoder_logvar,model,sample_costs,training_dataset
-
-
-
-def generate_uniform_vectors(number,dim):
+def generate_uniform_vectors(number):
 
     coordinates = Uniform(-1,1).sample((number,2)) 
 
@@ -363,7 +311,7 @@ def generate_uniform_vectors(number,dim):
 
 
 
-
+#This function really needs to be fixed and made clear what we are measuring
 def evaluate_epoch(model,training_dataset,config, epoch_idx, optimizer,cost_func,eval_num):
 
     model.eval()
@@ -376,20 +324,23 @@ def evaluate_epoch(model,training_dataset,config, epoch_idx, optimizer,cost_func
     for batch in training_dataloader:
         _, batch_solutions_1, batch_solutions_2 = batch
 
+        solutions = torch.cat((batch_solutions_1, batch_solutions_2),dim=0)
+
 
         #Cant we just decode the whole thing here
-        _,mean,log_var,Z, solutions_test,tour_logp,solutions_train = model(context = None,solution = batch_solutions_1,config = config,teacher_forcing = False,greedy = True)
+        _,mean,log_var,Z, solutions_test,tour_logp,_,_,_ = model(context = None,solution = solutions,config = config,teacher_forcing = False,greedy = True)
 
         break
 
 
     #Testing the coverage of the latent space
-    uniform_latents = generate_uniform_vectors(number = eval_num,dim = 1)
+    #We can just apply the transofrmation to these
+    uniform_latents = generate_uniform_vectors(number = eval_num)
 
     #Generate solutions for this
     _, solutions_test_2, _ = model.decode(
         
-        solutions_train,
+        None,
         None,
         uniform_latents.to(Z.device),
         config,
@@ -397,15 +348,27 @@ def evaluate_epoch(model,training_dataset,config, epoch_idx, optimizer,cost_func
         
     )
 
+    improved_latents = model.improve_solution(uniform_latents.to(Z.device)
+)
 
+        #Generate solutions for this
+    _, solutions_test_3, _ = model.decode(
+        
+        None,
+        None,
+        improved_latents,
+        config,
+        greedy = True,
+        
+    )
 
-    costs_train = cost_func(solutions_train).unsqueeze(dim=1)
+    costs_train = cost_func(solutions).unsqueeze(dim=1)
     costs_test = cost_func(solutions_test).unsqueeze(dim=1)
     costs_test2 = cost_func(solutions_test_2).unsqueeze(dim=1)
+    costs_test3 = cost_func(solutions_test_3).unsqueeze(dim=1)
 
 
-
-    return Z,uniform_latents,costs_train,costs_test,costs_test2
+    return Z,uniform_latents,improved_latents,costs_train,costs_test,costs_test2,costs_test3
 
 
 
@@ -429,37 +392,24 @@ def train(model,config,cost_func,run_id):
     writer.add_custom_scalars(layout)
 
     #Training parameters
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-
-    #This in principle should not be nessesary
-    #Basically all we are trying to get here is the validation data
-    #Works for now but change soon
-    #Should program it like there is a context
-    epoch_size_freeze = config.epoch_size
-    config.epoch_size = 93440
-    #_, validation_data = read_instance_data(config)
+    params = list(model.encoder.parameters()) + list(model.decoder.parameters())
+    optimizer = torch.optim.Adam(params, lr=config.lr)
+    optimizer_imp = torch.optim.Adam(model.improve_solution.parameters(), lr=config.lr)
 
     #Dataset object
     training_dataset = Dataset_Random(config.epoch_size, config.problem_size,config)
-    #validation_dataset = Dataset_Random(config.network_validation_size, config.problem_size, config)
 
-
-    config.epoch_size = epoch_size_freeze
-
-    #Setting initial variables
-    #best_avg_gap = np.inf
 
     for epoch_idx in range(1, config.nb_epochs + 1):
 
         #Training
-        loss_RC_values,loss_KLD_values,loss_C_values,mean_encoder_logvar,model,sample_costs,training_dataset = train_epoch(model,training_dataset, config, epoch_idx, optimizer,cost_func,writer)
+        loss_RC_values,loss_KLD_values,loss_C_values,loss_improvement,mean_encoder_logvar,model,sample_costs,training_dataset = train_epoch(model,training_dataset, config, epoch_idx, optimizer,optimizer_imp,cost_func,writer)
 
         #Validation
-        latents_train,latents_test,cost_train,cost_test,cost_test2 = evaluate_epoch(model,training_dataset,config, epoch_idx, optimizer,cost_func,eval_num = 512)
+        latents_train,latents_test,improved_latents,cost_train,cost_test,cost_test2,cost_test3 = evaluate_epoch(model,training_dataset,config, epoch_idx, optimizer,cost_func,eval_num = 512)
 
 
-
-        plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost_func,config,epoch_idx)
+        plot_tensors(latents_train,latents_test,cost_train,cost_test,cost_test2,cost_func,config,epoch_idx,improved_latents,cost_test3)
 
 
         #Logging Training Variables
@@ -467,6 +417,7 @@ def train(model,config,cost_func,run_id):
         writer.add_scalar("Loss_KLD", sum(loss_KLD_values)/len(loss_KLD_values), epoch_idx)
         writer.add_scalar("Loss_C", sum(loss_C_values)/len(loss_C_values), epoch_idx)
         writer.add_scalar("Encoder_Variance", sum(mean_encoder_logvar)/len(mean_encoder_logvar), epoch_idx)
+        writer.add_scalar("Loss_Improvement", sum(loss_improvement)/len(loss_improvement), epoch_idx)
 
         writer.add_scalar("Sample Mean", torch.mean(cost_test2), epoch_idx)
         writer.add_scalar("Sample Max", torch.max(cost_test2), epoch_idx)
@@ -530,44 +481,3 @@ if __name__ == "__main__":
 
     train(Model, config,toy.cost_func,run_id = run_id)
 
-
-"""
-if (epoch_idx-1) % config.validation_period == 0:
-
-    #Hardcoded for now, later need to figure out what I want to do with this
-    config.search_space_bound = 1loss
-
-
-    #Need to investigate this function as It is a bit of a mess
-
-    
-    avg_gap, _,_,budget_gaps = generate_solutions_instances(
-        
-        model = model,
-        config = config,
-        validation_context = validation_data,
-
-        greedy = True, #I am not sure if this makes sense surely it is a given that it is greedy
-        latent_search_strat = 'random',
-        cost_func = cost_func,
-        
-    )
-
-    # Save most recent version of the model
-    model_data = {
-        'parameters': model.state_dict(),
-        'code_version': VERSION,
-        'problem': config.problem,
-        'problem_size': config.problem_size,
-        'Z_bound': 0,
-        'avg_gap': avg_gap,
-        'training_epochs': epoch_idx,
-        'model': "VAE_final"
-    }
-
-    torch.save(model_data, os.path.join(config.output_path, "models",
-                                        "model_{0}.pt".format(run_id, epoch_idx)))
-
-
-    writer.add_scalar("optimality_gap_budget:1/random", budget_gaps[1], epoch_idx)
-"""

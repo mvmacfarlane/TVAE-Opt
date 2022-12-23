@@ -31,6 +31,9 @@ class Encoder(nn.Module):
         self.output_head_mu = nn.Linear(128,self.latent_size)
         self.output_head_sigma = nn.Linear(128,self.latent_size)
 
+
+
+
     def reparameterise(self,mu, logvar):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
@@ -51,6 +54,15 @@ class Encoder(nn.Module):
 
         Z = self.reparameterise(mu, log_sigma)
         Z = scale_within_unit(Z)
+
+
+
+
+        
+
+
+        
+
 
         #unit = torch.ones(size = (Z.shape[0],1)).to(Z.device)
         #zeros = torch.zeros(size = (Z.shape[0],1)).to(Z.device)
@@ -179,7 +191,30 @@ class Decoder(nn.Module):
 
 
 
+#General function solver
+class Improver(nn.Module):
+    def __init__(self):
+        super(Improver, self).__init__()
 
+        #Improvement Layers
+        layers = []
+        layers.append(nn.Linear(2,128))
+        layers.append(nn.ReLU())
+        layers.append(nn.Linear(128,128))
+        layers.append(nn.ReLU())
+        layers.append(nn.Linear(128,2))
+
+        self.improve_solution = nn.Sequential(*layers)
+
+
+    #forward pass on specific solution to be encoded
+    #We dont even use the config yet,why is that
+    def forward(self,Z):
+
+        Z_improved = self.improve_solution(Z)
+        Z_improved = scale_within_unit(Z_improved)
+    
+        return Z_improved
 
 #General function solver
 class NN_Solver(nn.Module):
@@ -190,6 +225,7 @@ class NN_Solver(nn.Module):
 
         self.encoder = Encoder(latent_size = self.latent_size)
         self.decoder = Decoder(latent_size = self.latent_size)
+        self.improve_solution = Improver()
 
         
 
@@ -202,6 +238,11 @@ class NN_Solver(nn.Module):
         #Do we want this variance at test time, interesting question
         #Encoder is not running correctly
         Z, mu, log_var = self.encoder(solution)
+
+
+        #Simply Improving the solution
+        Z_improved = self.improve_solution(Z)
+        
 
 
 
@@ -220,8 +261,18 @@ class NN_Solver(nn.Module):
 
         )
 
+        _, tour_idx_improved,tour_logp_improved,_,_ = self.decoder(
+            
+            context = context,
+            solution = solution,
+            Z = Z_improved,
+            teacher_forcing = False,   
+            greedy = True,        
+
+        )
+
                 
-        return None, mu, log_var, Z, tour_idx, tour_logp,solution
+        return None, mu, log_var, Z, tour_idx, tour_logp,solution,tour_idx_improved,tour_logp_improved
 
     #This just greedily decodes what you think the solution is for a given latent variable
     #Only reason we have this decoding step is that we output a latent one by one
